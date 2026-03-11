@@ -23,9 +23,18 @@ apt-get update
 # Install all available nodejs versions
 apt-get install -y nodejs-*
 
+# Source node-use in bashrc for non-login shells
+NODE_USE_LINE='[ -f /etc/profile.d/node-use.sh ] && . /etc/profile.d/node-use.sh'
+BASHRC="/etc/bash.bashrc"
+if ! grep -qF "node-use.sh" "$BASHRC" 2>/dev/null; then
+  echo "" >> "$BASHRC"
+  echo "# Node.js version switching (nodejs-deb)" >> "$BASHRC"
+  echo "$NODE_USE_LINE" >> "$BASHRC"
+fi
+
 echo ""
 echo "Node.js installed successfully!"
 echo "Switch version:  node-use 24  (or 22, etc.)"
 echo "List versions:   node-use"
 echo ""
-echo "Start a new shell for node-use to be available."
+echo "Open a new terminal to get started."
