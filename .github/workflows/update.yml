@@ -9,6 +9,9 @@ on:
       versions:
         description: "Major versions to build (comma-separated, e.g. '22,24'). Leave empty for all supported."
         required: false
+      revision:
+        description: "Override revision number (e.g. '2'). Leave empty to auto-increment."
+        required: false
 
 permissions:
   contents: write
@@ -35,6 +38,7 @@ jobs:
         id: check
         env:
           INPUT_VERSIONS: ${{ github.event.inputs.versions }}
+          INPUT_REVISION: ${{ github.event.inputs.revision }}
         run: |
           VERSIONS="${INPUT_VERSIONS:-$SUPPORTED_VERSIONS}"
           INDEX=$(curl -sL "https://nodejs.org/dist/index.json")
@@ -50,14 +54,18 @@ jobs:
 
             # Check if already packaged via git tags
             LATEST_TAG=$(git tag -l "nodejs-${MAJOR}/v${FULL}-*" --sort=-v:refname | head -1)
-            if [ -n "$LATEST_TAG" ] && [ -z "${INPUT_VERSIONS}" ]; then
+            if [ -n "$LATEST_TAG" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
               echo "nodejs-${MAJOR} v${FULL} already packaged, skipping"
               continue
             fi
 
             # Find revision number
-            CURRENT_REV=$(git tag -l "nodejs-${MAJOR}/v${FULL}-*" --sort=-v:refname | head -1 | sed "s|nodejs-${MAJOR}/v${FULL}-||" || echo "0")
-            NEW_REV=$(( ${CURRENT_REV:-0} + 1 ))
+            if [ -n "${INPUT_REVISION}" ]; then
+              NEW_REV="${INPUT_REVISION}"
+            else
+              CURRENT_REV=$(git tag -l "nodejs-${MAJOR}/v${FULL}-*" --sort=-v:refname | head -1 | sed "s|nodejs-${MAJOR}/v${FULL}-||" || echo "0")
+              NEW_REV=$(( ${CURRENT_REV:-0} + 1 ))
+            fi
 
             MATRIX=$(echo "$MATRIX" | jq -c ". + [{\"major\": \"${MAJOR}\", \"version\": \"${FULL}\", \"revision\": \"${NEW_REV}\"}]")
             echo "Will build: nodejs-${MAJOR} v${FULL}-${NEW_REV}"
