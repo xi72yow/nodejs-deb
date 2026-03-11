@@ -1,0 +1,174 @@
+name: Update Node.js Packages
+
+on:
+  schedule:
+    # Check for new releases daily at 7 AM UTC
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: "Major versions to build (comma-separated, e.g. '22,24'). Leave empty for all supported."
+        required: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Only supported (non-EOL) versions — EOL versions belong in containers
+env:
+  SUPPORTED_VERSIONS: "22,24"
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.check.outputs.matrix }}
+      has_updates: ${{ steps.check.outputs.has_updates }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for new releases
+        id: check
+        env:
+          INPUT_VERSIONS: ${{ github.event.inputs.versions }}
+        run: |
+          VERSIONS="${INPUT_VERSIONS:-$SUPPORTED_VERSIONS}"
+          INDEX=$(curl -sL "https://nodejs.org/dist/index.json")
+
+          MATRIX="[]"
+          for MAJOR in $(echo "$VERSIONS" | tr ',' ' '); do
+            FULL=$(echo "$INDEX" | jq -r "[.[] | select(.version | startswith(\"v${MAJOR}.\"))][0].version" | sed 's/^v//')
+
+            if [ -z "$FULL" ] || [ "$FULL" = "null" ]; then
+              echo "Warning: No release found for v${MAJOR}.x, skipping"
+              continue
+            fi
+
+            # Check if already packaged via git tags
+            LATEST_TAG=$(git tag -l "nodejs-${MAJOR}/v${FULL}-*" --sort=-v:refname | head -1)
+            if [ -n "$LATEST_TAG" ] && [ -z "${INPUT_VERSIONS}" ]; then
+              echo "nodejs-${MAJOR} v${FULL} already packaged, skipping"
+              continue
+            fi
+
+            # Find revision number
+            CURRENT_REV=$(git tag -l "nodejs-${MAJOR}/v${FULL}-*" --sort=-v:refname | head -1 | sed "s|nodejs-${MAJOR}/v${FULL}-||" || echo "0")
+            NEW_REV=$(( ${CURRENT_REV:-0} + 1 ))
+
+            MATRIX=$(echo "$MATRIX" | jq -c ". + [{\"major\": \"${MAJOR}\", \"version\": \"${FULL}\", \"revision\": \"${NEW_REV}\"}]")
+            echo "Will build: nodejs-${MAJOR} v${FULL}-${NEW_REV}"
+          done
+
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          if [ "$MATRIX" = "[]" ]; then
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+            echo "No updates needed."
+          else
+            echo "has_updates=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check-versions
+    if: needs.check-versions.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.check-versions.outputs.matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Build .deb package
+        run: |
+          chmod +x scripts/build-deb.sh
+          ./scripts/build-deb.sh "${{ matrix.major }}" "${{ matrix.revision }}"
+
+      - name: Test .deb package
+        run: |
+          DEB=$(ls packages/nodejs-${{ matrix.major }}_*.deb)
+          echo "=== Package info ==="
+          dpkg-deb -I "$DEB"
+
+          echo "=== Test install ==="
+          sudo dpkg -i "$DEB"
+
+          echo "=== Verify binaries ==="
+          /usr/lib/nodejs-${{ matrix.major }}/bin/node --version
+          /usr/lib/nodejs-${{ matrix.major }}/bin/npm --version
+
+          echo "=== Check library dependencies ==="
+          ldd /usr/lib/nodejs-${{ matrix.major }}/bin/node | grep "not found" && exit 1 || echo "All libraries resolved."
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-${{ matrix.major }}
+          path: packages/*.deb
+
+  publish:
+    needs: [check-versions, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/
+          merge-multiple: true
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "${GPG_PRIVATE_KEY}" | gpg --batch --import
+
+      - name: Update APT repository
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          chmod +x scripts/update-repo.sh
+          ./scripts/update-repo.sh
+
+      - name: Tag releases
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          MATRIX='${{ needs.check-versions.outputs.matrix }}'
+          echo "$MATRIX" | jq -r '.[] | "nodejs-\(.major)/v\(.version)-\(.revision)"' | while read TAG; do
+            git tag "$TAG"
+            git push origin "$TAG"
+          done
+
+      - name: Upload repo artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo/
+
+  deploy-pages:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
