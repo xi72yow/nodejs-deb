@@ -87,6 +87,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils
 
+      - name: Build nodejs-common
+        run: |
+          chmod +x scripts/build-common-deb.sh
+          ./scripts/build-common-deb.sh
+
       - name: Build .deb package
         run: |
           chmod +x scripts/build-deb.sh
@@ -94,6 +99,9 @@ jobs:
 
       - name: Test .deb package
         run: |
+          # Install nodejs-common first (dependency)
+          sudo dpkg -i packages/nodejs-common_*.deb
+
           DEB=$(ls packages/nodejs-${{ matrix.major }}_*.deb)
           echo "=== Package info ==="
           dpkg-deb -I "$DEB"
@@ -133,6 +141,11 @@ jobs:
         with:
           path: packages/
           merge-multiple: true
+
+      - name: Build nodejs-common
+        run: |
+          chmod +x scripts/build-common-deb.sh
+          ./scripts/build-common-deb.sh
 
       - name: Import GPG key
         env:

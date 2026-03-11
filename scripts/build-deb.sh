@@ -120,7 +120,7 @@ Version: ${DEB_VERSION}
 Architecture: amd64
 Maintainer: nodejs-deb repository <noreply@github.com>
 Installed-Size: ${INSTALLED_SIZE}
-Depends: libc6, libstdc++6, libgcc-s1
+Depends: libc6, libstdc++6, libgcc-s1, nodejs-common
 Section: javascript
 Priority: optional
 Homepage: https://nodejs.org
@@ -129,11 +129,6 @@ Description: Node.js v${MAJOR}.x runtime environment
  Use 'node-use ${MAJOR}' to activate this version (per-user PATH switching).
  Multiple versions can be installed side by side.
 CTLEOF
-
-# node-use.sh — NOT a conffile, so dpkg overwrites it on upgrade (EOL dates need updating)
-mkdir -p "${PKG_DIR}/etc/profile.d"
-cp "$(cd "$(dirname "$0")" && pwd)/node-use.sh" "${PKG_DIR}/etc/profile.d/node-use.sh"
-chmod 644 "${PKG_DIR}/etc/profile.d/node-use.sh"
 
 # Build .deb
 dpkg-deb --build --root-owner-group "${PKG_DIR}"
