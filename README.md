@@ -39,6 +39,12 @@ Switching persists across new shells via `~/.node-version`.
 ./scripts/update-repo.sh --no-sign  # Generate unsigned repo metadata
 ```
 
+## Static linking
+
+The packages use official Node.js tarballs from nodejs.org, which bundle dependencies like OpenSSL, ICU, libuv, zlib, and others statically. Only base system libraries (libc6, libstdc++6, libgcc-s1) remain dynamically linked.
+
+This is a deliberate choice: different Node.js versions require different versions of these libraries, and bundling them avoids dependency conflicts when running multiple versions side by side. The trade-off is that security patches for bundled libraries (e.g. OpenSSL) come through new Node.js releases rather than system-wide `apt upgrade`. Since this repository only offers actively supported versions (LTS + Current), which receive regular upstream security updates, this is effectively a non-issue.
+
 ## Security
 
 - Tarballs are downloaded from `nodejs.org` and verified against official `SHASUMS256.txt`
